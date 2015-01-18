@@ -27,6 +27,7 @@ module Lotus
           def initialize(dataset, mapped_collection)
             super(dataset)
             @mapped_collection = mapped_collection
+            @schema            = Hash[*dataset.db.schema(mapped_collection.name).flatten]
           end
 
           # Filters the current scope with an `exclude` directive.
@@ -56,6 +57,7 @@ module Lotus
           # @since 0.1.0
           def insert(entity)
             serialized_entity            = _serialize(entity)
+            serialized_entity            = _coerce_custom_attributes(serialized_entity)
             serialized_entity[_identity] = super(serialized_entity)
 
             _deserialize(serialized_entity)
@@ -182,6 +184,7 @@ module Lotus
           # @since 0.1.0
           def update(entity)
             serialized_entity = _serialize(entity)
+            serialized_entity = _coerce_custom_attributes(serialized_entity)
             super(serialized_entity)
 
             _deserialize(serialized_entity)
@@ -199,6 +202,35 @@ module Lotus
           end
 
           private
+          # Coerces custom coercion types to database types.
+          #
+          # @param serialized_entity [Hash] the hash containing an entity's attributes
+          #
+          # @return [Hash] the serialized entity
+          #
+          # @api private
+          # @since 0.3.0
+          def _coerce_custom_attributes(serialized_entity)
+            @mapped_collection.attributes.each do |attribute, _|
+              next if attribute == :id
+
+              attribute_db_type = @schema[attribute][:type]
+              attribute_type    = Lotus::Utils::String.new(serialized_entity[attribute].class).underscore.to_sym
+
+              next if attribute_db_type == attribute_type
+
+              method_name ="to_#{attribute_db_type}"
+              unless serialized_entity[attribute].respond_to?( method_name )
+                raise NoMethodError, "#{serialized_entity[attribute].class}##{method_name} (object "+
+                                     "does not support coercion to DB type #{attribute_db_type})"
+              end
+
+              serialized_entity[attribute] = serialized_entity[attribute].send( method_name )
+            end
+
+            serialized_entity
+          end
+
           # Serialize the given entity before to persist in the database.
           #
           # @return [Hash] the serialized entity

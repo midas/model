@@ -42,6 +42,51 @@ module Lotus
         end
 
         private
+        # Determines if the given coercion is a primitive type or custom.
+        # Returns true if primitive, otherwise false.
+        #
+        # @param klass [Class]
+        #
+        # @return [Boolean]
+        #
+        # @api private
+        # @since 0.3.0
+        def primitive_coercion?(klass)
+          Lotus::Model::Mapping::Coercions.methods(false).include?(klass.name.to_sym)
+        end
+
+        # Generates the coercion expression for use when compiling #to_record.
+        #
+        # @param klass [Class]
+        # @param mapped [Symbol]
+        #
+        # @return [String]
+        #
+        # @api private
+        # @since 0.3.0
+        def to_record_coercion_expression(klass, name)
+          if primitive_coercion?(klass)
+            return "Lotus::Model::Mapping::Coercions.#{klass}(entity.#{name})"
+          end
+
+          "(entity.#{name}.is_a?(#{klass}) ? entity.#{name} : #{klass}.new(entity.#{name}))"
+        end
+
+        # Generates the coercion expression for use when compiling #from_record.
+        #
+        # @param klass [Class]
+        # @param mapped [Symbol]
+        #
+        # @return [String]
+        #
+        # @api private
+        # @since 0.3.0
+        def from_record_coercion_expression(klass, mapped)
+          primitive_coercion?(klass) ?
+            "Lotus::Model::Mapping::Coercions.#{klass}(record[:#{mapped}])" :
+            "#{klass}.new(record[:#{mapped}])"
+        end
+
         # Compile itself for performance boost.
         #
         # @api private
@@ -58,15 +103,15 @@ module Lotus
           instance_eval <<-EVAL, __FILE__, __LINE__
             def to_record(entity)
               if entity.id
-                Hash[#{ @collection.attributes.map{|name,(klass,mapped)| ":#{mapped},Lotus::Model::Mapping::Coercions.#{klass}(entity.#{name})"}.join(',') }]
+                Hash[#{ @collection.attributes.map{|name,(klass,mapped)| ":#{mapped},#{to_record_coercion_expression(klass, name)}"}.join(',') }]
               else
-                Hash[#{ @collection.attributes.reject{|name,_| name == @collection.identity }.map{|name,(klass,mapped)| ":#{mapped},Lotus::Model::Mapping::Coercions.#{klass}(entity.#{name})"}.join(',') }]
+                Hash[#{ @collection.attributes.reject{|name,_| name == @collection.identity }.map{|name,(klass,mapped)| ":#{mapped},#{to_record_coercion_expression(klass, name)}"}.join(',') }]
               end
             end
 
             def from_record(record)
               #{ @collection.entity }.new(
-                Hash[#{ @collection.attributes.map{|name,(klass,mapped)| ":#{name},Lotus::Model::Mapping::Coercions.#{klass}(record[:#{mapped}])"}.join(',') }]
+                Hash[#{ @collection.attributes.map{|name,(klass,mapped)| ":#{name},#{from_record_coercion_expression(klass, mapped)}"}.join(',') }]
               )
             end
 
